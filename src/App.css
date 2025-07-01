@@ -1,0 +1,130 @@
+/* Estilos Gerais */
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f0f2f5;
+  color: #333;
+}
+
+.App {
+  text-align: center;
+}
+
+/* Cabeçalho */
+.App-header {
+  background-color: #282c34;
+  padding: 20px;
+  color: white;
+  margin-bottom: 30px;
+}
+
+.App-header h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+/* Conteúdo Principal */
+main {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+/* Contêiner do Formulário e da Lista */
+.form-container, .appointments-list, .admin-section {
+  background-color: white;
+  padding: 25px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+h2 {
+  margin-top: 0;
+  color: #0056b3;
+  border-bottom: 2px solid #f0f2f5;
+  padding-bottom: 10px;
+}
+
+/* Formulário */
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+input, select, button {
+  padding: 12px;
+  border-radius: 5px;
+  border: 1px solid #ccc;
+  font-size: 1rem;
+}
+
+input:focus, select:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
+}
+
+button {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.3s ease;
+}
+
+button:hover {
+  background-color: #0056b3;
+}
+
+/* Lista de Agendamentos */
+.appointments-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.appointments-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px;
+  border-bottom: 1px solid #eee;
+}
+
+.appointments-list li:last-child {
+  border-bottom: none;
+}
+
+.appointment-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.appointment-details strong {
+  font-size: 1.1rem;
+}
+
+.appointment-details span {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+/* Botões de Ação */
+.remove-btn, .reset-all-btn {
+  background-color: #dc3545;
+}
+
+.remove-btn:hover, .reset-all-btn:hover {
+  background-color: #c82333;
+}
