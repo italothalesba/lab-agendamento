@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createClient } from '@supabase/supabase-js';
 
-// --- CONFIGURAÇÕES GERAIS ---
-const LOCAL_STORAGE_KEY = 'labBookingsV2';
-const MASTER_PASSWORD = 'MeuCunhadoEFoda';
+// --- CONFIGURAÇÕES E CONEXÃO COM SUPABASE ---
+const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
+const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// --- COMPONENTE DA TABELA DE VISÃO GERAL (Calendário) ---
-// Este componente é "burro", apenas renderiza os dados que recebe.
+const MASTER_PASSWORD = 'admin123';
+
+// --- COMPONENTE DA TABELA DE VISÃO GERAL ---
 const FullScheduleTable = ({ equipment, days, shifts, bookings, onCellClick }) => {
   return (
     <div className="overflow-x-auto border border-gray-200 rounded-lg">
@@ -33,7 +36,7 @@ const FullScheduleTable = ({ equipment, days, shifts, bookings, onCellClick }) =
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
-          {equipment.map((equip, equipIndex) => (
+          {equipment.map((equip) => (
             <tr key={equip} className="hover:bg-gray-50">
               <td className="sticky left-0 px-3 py-4 whitespace-nowrap font-medium text-gray-900 bg-white hover:bg-gray-50 z-10">
                 {equip}
@@ -65,9 +68,10 @@ const FullScheduleTable = ({ equipment, days, shifts, bookings, onCellClick }) =
   );
 };
 
+
 // --- COMPONENTE PRINCIPAL ---
 function App() {
-  // --- ESTADOS (DATA) ---
+  // Estados de dados e UI
   const [equipment] = useState([
     "Silva (S)", "Lafferty (L)", "Takemoto (T)",
     "Moravec (M)", "Kritsky (K)", "Microscopio Leica",
@@ -76,154 +80,157 @@ function App() {
   const [days] = useState(["Seg", "Ter", "Qua", "Qui", "Sex"]);
   const [shifts] = useState(["Manhã", "Tarde", "Noite"]);
   const [bookings, setBookings] = useState({});
-
-  // --- ESTADOS (UI) ---
+  const [loading, setLoading] = useState(true);
   const [selectedEquipment, setSelectedEquipment] = useState(equipment[0]);
   const [selectedDay, setSelectedDay] = useState(days[0]);
   const [modal, setModal] = useState({ type: null, data: null, message: '' });
 
-  // --- HOOKS DE EFEITO (localStorage) ---
-  useEffect(() => {
+  // Busca inicial dos dados
+  const fetchBookings = useCallback(async () => {
+    setLoading(true);
     try {
-      const storedBookings = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (storedBookings) setBookings(JSON.parse(storedBookings));
-    } catch (error) { console.error("Erro ao carregar dados:", error); }
+      const { data, error } = await supabase.from('bookings').select('*');
+      if (error) throw error;
+      const bookingsObject = data.reduce((acc, booking) => {
+        acc[booking.id] = { studentName: booking.student_name, password: booking.password };
+        return acc;
+      }, {});
+      setBookings(bookingsObject);
+    } catch (error) {
+      setModal({ type: 'info', message: `Erro ao buscar agendamentos: ${error.message}` });
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(bookings));
-    } catch (error) { console.error("Erro ao salvar dados:", error); }
-  }, [bookings]);
+    fetchBookings();
+  }, [fetchBookings]);
 
-  // --- FUNÇÕES DE LÓGICA ---
-  const handleSlotClick = (shift) => {
-    const timeSlotId = `${selectedEquipment}-${selectedDay}-${shift}`;
-    const existingBooking = bookings[timeSlotId];
-    if (existingBooking) setModal({ type: 'unbookConfirm', data: { timeSlotId, booking: existingBooking } });
-    else setModal({ type: 'bookInput', data: { shift } });
-  };
-  
-  const handleTableCellClick = (equip, day, shift, bookingInfo) => {
-      let message;
-      if (bookingInfo) {
-          message = `O equipamento "${equip}" está agendado para ${bookingInfo.studentName} no período da ${shift} de ${day}.`;
-      } else {
-          message = `O equipamento "${equip}" está livre no período da ${shift} de ${day}. Use os seletores acima para agendar.`;
-      }
-      setModal({ type: 'slotInfo', message: message });
-  };
-
-  const performBooking = (studentName, password) => {
+  // Funções de Ações (Booking, Unbooking, Reset)
+  const performBooking = async (studentName, password) => {
     if (!studentName?.trim() || !password?.trim()) {
       setModal({ type: 'info', message: 'Nome e senha são obrigatórios.' }); return;
     }
     const { shift } = modal.data;
     const timeSlotId = `${selectedEquipment}-${selectedDay}-${shift}`;
-    setBookings(prev => ({ ...prev, [timeSlotId]: { studentName: studentName.trim(), password: password.trim() } }));
-    setModal({ type: 'info', message: 'Agendamento realizado com sucesso!' });
+    const newBookingData = { studentName: studentName.trim(), password: password.trim() };
+    setBookings(prev => ({ ...prev, [timeSlotId]: newBookingData }));
+    closeModal();
+    const { error } = await supabase.from('bookings').insert({ id: timeSlotId, student_name: studentName.trim(), password: password.trim() });
+    if (error) {
+      setModal({ type: 'info', message: `Erro: ${error.message}` });
+      setBookings(prev => {
+        const newState = { ...prev };
+        delete newState[timeSlotId];
+        return newState;
+      });
+    }
   };
 
-  const performUnbooking = (passwordAttempt) => {
+  const performUnbooking = async (passwordAttempt) => {
     const { timeSlotId, booking } = modal.data;
-    if (passwordAttempt === booking.password || passwordAttempt === MASTER_PASSWORD) {
-      const newBookings = { ...bookings };
-      delete newBookings[timeSlotId];
-      setBookings(newBookings);
-      setModal({ type: 'info', message: 'Agendamento removido com sucesso.' });
+    if (passwordAttempt !== booking.password && passwordAttempt !== MASTER_PASSWORD) {
+        setModal({ type: 'info', message: 'Senha incorreta.' }); return;
+    }
+    const oldBookings = { ...bookings };
+    setBookings(prev => {
+      const newState = { ...prev };
+      delete newState[timeSlotId];
+      return newState;
+    });
+    closeModal();
+    const { error } = await supabase.from('bookings').delete().eq('id', timeSlotId);
+    if (error) {
+      setModal({ type: 'info', message: `Erro ao desmarcar: ${error.message}` });
+      setBookings(oldBookings);
+    }
+  };
+  
+  const performReset = useCallback(async (passwordAttempt) => {
+    if (passwordAttempt !== MASTER_PASSWORD) {
+      setModal({ type: 'info', message: 'Senha de administrador incorreta.' }); return;
+    }
+    const oldBookings = {...bookings};
+    setBookings({});
+    closeModal();
+    const { error } = await supabase.from('bookings').delete().neq('id', 'impossivel');
+    if (error) {
+      setModal({ type: 'info', message: `Erro ao resetar: ${error.message}` });
+      setBookings(oldBookings);
     } else {
-      setModal({ type: 'info', message: 'Senha incorreta. Apenas quem agendou ou um administrador pode desmarcar.' });
+      setModal({ type: 'info', message: 'Agendamentos resetados.' });
+    }
+  }, [bookings]);
+
+  // Funções de manipulação de UI
+  const handleSlotClick = (shift) => {
+    const timeSlotId = `${selectedEquipment}-${selectedDay}-${shift}`;
+    const existingBooking = bookings[timeSlotId];
+    if (existingBooking) {
+      setModal({ type: 'unbookConfirm', data: { timeSlotId, booking: existingBooking } });
+    } else {
+      setModal({ type: 'bookInput', data: { shift } });
     }
   };
 
-  const requestResetConfirmation = () => setModal({ type: 'resetConfirm' });
-
-  const performReset = useCallback((passwordAttempt) => {
-    if (passwordAttempt === MASTER_PASSWORD) {
-      setBookings({});
-      setModal({ type: 'info', message: 'Todos os agendamentos foram resetados com sucesso!' });
-    } else {
-      setModal({ type: 'info', message: 'Senha de administrador incorreta. Operação cancelada.' });
-    }
-  }, []);
+  const handleTableCellClick = (equip, day, shift, bookingInfo) => {
+      let message;
+      if (bookingInfo) {
+          message = `"${equip}" está agendado para ${bookingInfo.studentName} no período da ${shift} de ${day}.`;
+      } else {
+          message = `"${equip}" está livre no período da ${shift} de ${day}. Use os seletores para agendar.`;
+      }
+      setModal({ type: 'slotInfo', message: message });
+  };
+  
+  // ****** ESTA É A FUNÇÃO QUE FALTAVA ******
+  const requestResetConfirmation = () => {
+    setModal({ type: 'resetConfirm' });
+  };
 
   const closeModal = () => setModal({ type: null, data: null, message: '' });
 
-  // --- COMPONENTES DE MODAL E RENDERIZAÇÃO ---
-  const ModalRenderer = () => { /* ...código do ModalRenderer permanece idêntico... */ 
+  // Componente de Modais
+  const ModalRenderer = () => {
     if (!modal.type) return null;
     const baseModalClass = "fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4";
     const modalContentClass = "bg-white rounded-xl shadow-2xl p-6 w-full max-w-md text-center transform transition-all";
     let nameInput, passInput, passAttemptInput = '';
 
-    const InfoModal = ({ title, children }) => (
-      <div className={baseModalClass} onClick={closeModal}>
-        <div className={modalContentClass} onClick={e => e.stopPropagation()}>
-          <h3 className="text-xl font-bold text-gray-800 mb-4">{title}</h3>
-          <p className="text-gray-600 mb-6">{modal.message || children}</p>
-          <button onClick={closeModal} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded-lg">OK</button>
-        </div>
-      </div>
+    const InfoModal = ({ title }) => (
+      <div className={baseModalClass} onClick={closeModal}><div className={modalContentClass} onClick={e => e.stopPropagation()}><h3 className="text-xl font-bold text-gray-800 mb-4">{title}</h3><p className="text-gray-600 mb-6">{modal.message}</p><button onClick={closeModal} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded-lg">OK</button></div></div>
     );
     
     switch (modal.type) {
       case 'info': return <InfoModal title="Aviso" />;
       case 'slotInfo': return <InfoModal title="Detalhes do Horário" />;
-      
-      case 'bookInput': return (
-        <div className={baseModalClass}>
-          <div className={modalContentClass}>
-            <h3 className="text-xl font-bold text-gray-800 mb-2">Agendar Horário</h3>
-            <p className="text-gray-600 mb-4">Agendando <span className="font-semibold">{selectedEquipment}</span> para <span className="font-semibold">{selectedDay}, {modal.data.shift}</span>.</p>
-            <input type="text" placeholder="Seu nome completo" autoFocus onChange={e => nameInput = e.target.value} className="w-full p-3 border rounded-lg mb-3" />
-            <input type="password" placeholder="Crie uma senha para desmarcar" onChange={e => passInput = e.target.value} className="w-full p-3 border rounded-lg mb-6" />
-            <div className="flex justify-center gap-4">
-              <button onClick={() => performBooking(nameInput, passInput)} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-lg">Confirmar</button>
-              <button onClick={closeModal} className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-6 rounded-lg">Cancelar</button>
-            </div>
-          </div>
-        </div>
-      );
-      case 'unbookConfirm': return (
-        <div className={baseModalClass}>
-          <div className={modalContentClass}>
-            <h3 className="text-xl font-bold text-gray-800 mb-2">Desmarcar Horário</h3>
-            <p className="text-gray-600 mb-4">Para desmarcar o horário de <span className="font-semibold">{modal.data.booking.studentName}</span>, digite a senha.</p>
-            <input type="password" placeholder="Senha do agendamento ou mestre" autoFocus onChange={e => passAttemptInput = e.target.value} className="w-full p-3 border rounded-lg mb-6" />
-            <div className="flex justify-center gap-4">
-              <button onClick={() => performUnbooking(passAttemptInput)} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-lg">Desmarcar</button>
-              <button onClick={closeModal} className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-6 rounded-lg">Cancelar</button>
-            </div>
-          </div>
-        </div>
-      );
-      case 'resetConfirm': return (
-        <div className={baseModalClass}>
-          <div className={modalContentClass}>
-            <h3 className="text-xl font-bold text-red-600 mb-2">Resetar Todos Agendamentos</h3>
-            <p className="text-gray-600 mb-4">Ação irreversível. Digite a senha de administrador para continuar.</p>
-            <input type="password" placeholder="Senha de Administrador" autoFocus onChange={e => passAttemptInput = e.target.value} className="w-full p-3 border rounded-lg mb-6" />
-            <div className="flex justify-center gap-4">
-              <button onClick={() => performReset(passAttemptInput)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg">Resetar Tudo</button>
-              <button onClick={closeModal} className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-6 rounded-lg">Cancelar</button>
-            </div>
-          </div>
-        </div>
-      );
+      case 'bookInput': return ( <div className={baseModalClass}><div className={modalContentClass}><h3 className="text-xl font-bold mb-2">Agendar Horário</h3><p className="text-gray-600 mb-4">Agendando <span className="font-semibold">{selectedEquipment}</span> para <span className="font-semibold">{selectedDay}, {modal.data.shift}</span>.</p><input type="text" placeholder="Seu nome completo" autoFocus onChange={e => nameInput = e.target.value} className="w-full p-3 border rounded-lg mb-3" /><input type="password" placeholder="Crie uma senha para desmarcar" onChange={e => passInput = e.target.value} className="w-full p-3 border rounded-lg mb-6" /><div className="flex justify-center gap-4"><button onClick={() => performBooking(nameInput, passInput)} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-lg">Confirmar</button><button onClick={closeModal} className="bg-gray-300 text-gray-800 font-bold py-2 px-6 rounded-lg">Cancelar</button></div></div></div>);
+      case 'unbookConfirm': return ( <div className={baseModalClass}><div className={modalContentClass}><h3 className="text-xl font-bold mb-2">Desmarcar Horário</h3><p className="text-gray-600 mb-4">Para desmarcar o horário de <span className="font-semibold">{modal.data.booking.studentName}</span>, digite a senha.</p><input type="password" placeholder="Senha do agendamento ou mestre" autoFocus onChange={e => passAttemptInput = e.target.value} className="w-full p-3 border rounded-lg mb-6" /><div className="flex justify-center gap-4"><button onClick={() => performUnbooking(passAttemptInput)} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-lg">Desmarcar</button><button onClick={closeModal} className="bg-gray-300 text-gray-800 font-bold py-2 px-6 rounded-lg">Cancelar</button></div></div></div>);
+      case 'resetConfirm': return ( <div className={baseModalClass}><div className={modalContentClass}><h3 className="text-xl font-bold text-red-600 mb-2">Resetar Tudo</h3><p className="text-gray-600 mb-4">Ação irreversível. Digite a senha de administrador.</p><input type="password" placeholder="Senha de Administrador" autoFocus onChange={e => passAttemptInput = e.target.value} className="w-full p-3 border rounded-lg mb-6" /><div className="flex justify-center gap-4"><button onClick={() => performReset(passAttemptInput)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg">Resetar</button><button onClick={closeModal} className="bg-gray-300 text-gray-800 font-bold py-2 px-6 rounded-lg">Cancelar</button></div></div></div>);
       default: return null;
     }
   };
 
+  // Renderização de carregamento
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex justify-center items-center">
+        <div className="text-xl font-semibold text-gray-600">Carregando agendamentos...</div>
+      </div>
+    );
+  }
+
+  // Renderização principal do App
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center p-4 sm:p-6 lg:p-8 font-inter">
       <ModalRenderer />
       
       <header className="w-full max-w-7xl mb-8 text-center">
         <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-gray-800">Sistema de Agendamento</h1>
-        <p className="text-gray-500 mt-2">LABEPii</p>
+        <p className="text-gray-500 mt-2">Laboratório de Ciências</p>
       </header>
 
-      {/* --- Seção de Ações (Agendar/Desmarcar) --- */}
       <section className="w-full max-w-2xl bg-white shadow-xl rounded-lg p-6 mb-12">
         <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Agendar um Horário</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -262,7 +269,6 @@ function App() {
         </div>
       </section>
 
-      {/* --- Seção de Visão Geral (Calendário) --- */}
       <section className="w-full max-w-7xl bg-white shadow-xl rounded-lg p-6">
           <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">Visão Geral da Semana</h2>
           <FullScheduleTable
