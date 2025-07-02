@@ -220,7 +220,7 @@ function App() {
       
       <header className="w-full max-w-7xl mb-8 text-center">
         <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-gray-800">Sistema de Agendamento</h1>
-        <p className="text-gray-500 mt-2">LABEP</p>
+        <p className="text-gray-500 mt-2">LABEPii</p>
       </header>
 
       {/* --- Seção de Ações (Agendar/Desmarcar) --- */}
